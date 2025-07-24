@@ -76,6 +76,6 @@ impl ExtMetadataBlockInfo for ExtMetadataBlockLevel17 {
     }
 
     fn required_bits(&self) -> u64 {
-        9 * 8
+        72
     }
 }
