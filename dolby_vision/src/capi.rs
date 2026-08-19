@@ -10,6 +10,9 @@ use std::{
 
 use crate::rpu::{ConversionMode, dovi_rpu::DoviRpu, utils::parse_rpu_file};
 
+#[cfg(feature = "serde")]
+use crate::rpu::generate::GenerateConfig;
+
 use super::c_structs::*;
 
 /// # Safety
@@ -19,7 +22,11 @@ use super::c_structs::*;
 /// Adds an error if the parsing fails.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dovi_parse_rpu(buf: *const u8, len: size_t) -> *mut RpuOpaque {
-    assert!(!buf.is_null());
+    if buf.is_null() {
+        return Box::into_raw(Box::new(RpuOpaque::invalid_with_error(
+            "dovi_parse_rpu: null buffer pointer",
+        )));
+    }
 
     let data = unsafe { slice::from_raw_parts(buf, len) };
     let res = DoviRpu::parse_rpu(data);
@@ -37,7 +44,11 @@ pub unsafe extern "C" fn dovi_parse_itu_t35_dovi_metadata_obu(
     buf: *const u8,
     len: size_t,
 ) -> *mut RpuOpaque {
-    assert!(!buf.is_null());
+    if buf.is_null() {
+        return Box::into_raw(Box::new(RpuOpaque::invalid_with_error(
+            "dovi_parse_itu_t35_dovi_metadata_obu: null buffer pointer",
+        )));
+    }
 
     let data = unsafe { slice::from_raw_parts(buf, len) };
     let res = DoviRpu::parse_itu_t35_dovi_metadata_obu(data);
@@ -52,7 +63,11 @@ pub unsafe extern "C" fn dovi_parse_itu_t35_dovi_metadata_obu(
 /// Adds an error if the parsing fails.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dovi_parse_unspec62_nalu(buf: *const u8, len: size_t) -> *mut RpuOpaque {
-    assert!(!buf.is_null());
+    if buf.is_null() {
+        return Box::into_raw(Box::new(RpuOpaque::invalid_with_error(
+            "dovi_parse_unspec62_nalu: null buffer pointer",
+        )));
+    }
 
     let data = unsafe { slice::from_raw_parts(buf, len) };
     let res = DoviRpu::parse_unspec62_nalu(data);
@@ -124,8 +139,7 @@ pub unsafe extern "C" fn dovi_write_rpu(ptr: *mut RpuOpaque) -> *const Data {
         match rpu.write_rpu() {
             Ok(buf) => Box::into_raw(Box::new(Data::from(buf))),
             Err(e) => {
-                opaque.error =
-                    Some(CString::new(format!("Failed writing byte buffer: {e}")).unwrap());
+                opaque.error = CString::new(format!("Failed writing byte buffer: {e}")).ok();
                 null_mut()
             }
         }
@@ -151,8 +165,7 @@ pub unsafe extern "C" fn dovi_write_unspec62_nalu(ptr: *mut RpuOpaque) -> *const
         match rpu.write_hevc_unspec62_nalu() {
             Ok(buf) => Box::into_raw(Box::new(Data::from(buf))),
             Err(e) => {
-                opaque.error =
-                    Some(CString::new(format!("Failed writing byte buffer: {e}")).unwrap());
+                opaque.error = CString::new(format!("Failed writing byte buffer: {e}")).ok();
                 null_mut()
             }
         }
@@ -191,7 +204,7 @@ pub unsafe extern "C" fn dovi_convert_rpu_with_mode(ptr: *mut RpuOpaque, mode: u
             Ok(_) => 0,
             Err(e) => {
                 opaque.error =
-                    Some(CString::new(format!("Failed converting with mode {mode}: {e}")).unwrap());
+                    CString::new(format!("Failed converting with mode {mode}: {e}")).ok();
                 -1
             }
         }
@@ -337,7 +350,7 @@ pub unsafe extern "C" fn dovi_parse_rpu_bin_file(path: *const c_char) -> *const 
 
                         let opaque_list: Vec<*mut RpuOpaque> = rpus
                             .into_iter()
-                            .map(|rpu| Box::into_raw(Box::new(RpuOpaque::new(Some(rpu), None))))
+                            .map(|rpu| Box::into_raw(Box::new(RpuOpaque::new(Some(rpu)))))
                             .collect();
 
                         rpu_list.list =
@@ -355,8 +368,8 @@ pub unsafe extern "C" fn dovi_parse_rpu_bin_file(path: *const c_char) -> *const 
                 Some("parse_rpu_bin_file: Failed parsing the input path as a string".to_string());
         }
 
-        if let Some(err) = error {
-            rpu_list.error = CString::new(err).unwrap().into_raw();
+        if let Some(err) = error.and_then(|err| CString::new(err).ok()) {
+            rpu_list.error = err.into_raw();
         }
 
         return Box::into_raw(Box::new(rpu_list));
@@ -403,7 +416,7 @@ pub unsafe extern "C" fn dovi_rpu_set_active_area_offsets(
             Ok(_) => 0,
             Err(e) => {
                 opaque.error =
-                    Some(CString::new(format!("Failed editing active area offsets: {e}")).unwrap());
+                    CString::new(format!("Failed editing active area offsets: {e}")).ok();
                 -1
             }
         }
@@ -436,6 +449,65 @@ pub unsafe extern "C" fn dovi_rpu_remove_mapping(ptr: *mut RpuOpaque) -> i32 {
 /// # Safety
 /// The struct pointer must be valid.
 ///
+/// Adds default CMv4.0 extension metadata (L3, L9, L11, L254) to the RPU.
+/// Does nothing if CMv4.0 metadata is already present.
+///
+/// Returns 1 if metadata was added, 0 if already present, -1 on error.
+/// If an error occurs, it is logged to RpuOpaque.error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dovi_rpu_add_cmv40_safe_default_metadata(ptr: *mut RpuOpaque) -> i32 {
+    if ptr.is_null() {
+        return -1;
+    }
+
+    let opaque = unsafe { &mut *ptr };
+
+    if let Some(rpu) = &mut opaque.rpu {
+        match rpu.add_cmv40_safe_default_metadata() {
+            Ok(modified) => modified as i32,
+            Err(e) => {
+                opaque.error =
+                    CString::new(format!("Failed setting CMv4.0 default metadata: {e}")).ok();
+                -1
+            }
+        }
+    } else {
+        -1
+    }
+}
+
+/// # Safety
+/// The struct pointer must be valid.
+///
+/// Removes the CMv4.0 extension metadata from the RPU, leaving a CMv2.9-only RPU.
+/// Does nothing if CMv4.0 metadata is not present.
+///
+/// Returns 0 on success, -1 on error.
+/// If an error occurs, it is logged to RpuOpaque.error.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dovi_rpu_remove_cmv40_metadata(ptr: *mut RpuOpaque) -> i32 {
+    if ptr.is_null() {
+        return -1;
+    }
+
+    let opaque = unsafe { &mut *ptr };
+
+    if let Some(rpu) = &mut opaque.rpu {
+        match rpu.remove_cmv40_extension_metadata() {
+            Ok(_) => 0,
+            Err(e) => {
+                opaque.error = CString::new(format!("Failed removing CMv4.0 metadata: {e}")).ok();
+                -1
+            }
+        }
+    } else {
+        -1
+    }
+}
+
+/// # Safety
+/// The struct pointer must be valid.
+///
 /// Writes the encoded RPU as `itu_t_t35_payload_bytes` for AV1 ITU-T T.35 metadata OBU
 /// If an error occurs in the writing, it is logged to RpuOpaque.error
 #[unsafe(no_mangle)]
@@ -452,8 +524,7 @@ pub unsafe extern "C" fn dovi_write_av1_rpu_metadata_obu_t35_payload(
         match rpu.write_av1_rpu_metadata_obu_t35_payload() {
             Ok(buf) => Box::into_raw(Box::new(Data::from(buf))),
             Err(e) => {
-                opaque.error =
-                    Some(CString::new(format!("Failed writing byte buffer: {e}")).unwrap());
+                opaque.error = CString::new(format!("Failed writing byte buffer: {e}")).ok();
                 null_mut()
             }
         }
@@ -481,12 +552,72 @@ pub unsafe extern "C" fn dovi_write_av1_rpu_metadata_obu_t35_complete(
         match rpu.write_av1_rpu_metadata_obu_t35_complete() {
             Ok(buf) => Box::into_raw(Box::new(Data::from(buf))),
             Err(e) => {
-                opaque.error =
-                    Some(CString::new(format!("Failed writing byte buffer: {e}")).unwrap());
+                opaque.error = CString::new(format!("Failed writing byte buffer: {e}")).ok();
                 null_mut()
             }
         }
     } else {
         null_mut()
     }
+}
+
+/// # Safety
+/// The JSON string pointer must be valid.
+///
+/// Generates RPUs from a JSON serialized `GenerateConfig`.
+/// Returns the heap allocated `DoviRpuOpaqueList` as a pointer.
+/// The returned pointer may be null, or the list could be empty if an error occurred.
+///
+/// Requires the `serde` feature.
+///
+/// Free with `dovi_rpu_list_free`.
+#[cfg(feature = "serde")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dovi_generate_from_json(json: *const c_char) -> *const RpuOpaqueList {
+    if json.is_null() {
+        return null();
+    }
+
+    let mut rpu_list = RpuOpaqueList {
+        list: null(),
+        len: 0,
+        error: null(),
+    };
+    let mut error = None;
+
+    let json_str = match unsafe { CStr::from_ptr(json) }.to_str() {
+        Ok(s) => s,
+        Err(e) => {
+            error = Some(format!("dovi_generate_from_json: invalid UTF-8: {e}"));
+            let err = error.and_then(|err| CString::new(err).ok());
+            if let Some(err) = err {
+                rpu_list.error = err.into_raw();
+            }
+            return Box::into_raw(Box::new(rpu_list));
+        }
+    };
+
+    match serde_json::from_str::<GenerateConfig>(json_str) {
+        Ok(config) => match config.generate_rpu_list() {
+            Ok(rpus) => {
+                rpu_list.len = rpus.len();
+
+                let opaque_list: Vec<*mut RpuOpaque> = rpus
+                    .into_iter()
+                    .map(|rpu| Box::into_raw(Box::new(RpuOpaque::new(Some(rpu)))))
+                    .collect();
+
+                rpu_list.list =
+                    Box::into_raw(opaque_list.into_boxed_slice()) as *const *mut RpuOpaque;
+            }
+            Err(e) => error = Some(format!("dovi_generate_from_json: generation failed: {e}")),
+        },
+        Err(e) => error = Some(format!("dovi_generate_from_json: invalid JSON: {e}")),
+    }
+
+    if let Some(err) = error.and_then(|err| CString::new(err).ok()) {
+        rpu_list.error = err.into_raw();
+    }
+
+    Box::into_raw(Box::new(rpu_list))
 }

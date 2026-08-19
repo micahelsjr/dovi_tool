@@ -70,22 +70,25 @@ pub struct EditConfig {
     rpu_levels: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     allow_cmv4_transfer: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    add_cmv4_default_metadata: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct ActiveArea {
     #[serde(default)]
-    crop: bool,
+    pub crop: bool,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    drop_l5: Option<String>,
+    pub drop_l5: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    presets: Option<Vec<ActiveAreaOffsets>>,
+    pub presets: Option<Vec<ActiveAreaOffsets>>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    edits: Option<HashMap<String, u16>>,
+    pub edits: Option<HashMap<String, u16>>,
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone)]
@@ -151,7 +154,18 @@ impl Editor {
 
         config.execute(&mut rpus)?;
 
-        let mut data = GenerateConfig::encode_option_rpus(&mut rpus);
+        let mut warned = false;
+        let mut data = GenerateConfig::encode_option_rpus(&rpus)
+            .enumerate()
+            .filter_map(|(i, res)| {
+                if !warned && let Err(err) = &res {
+                    warned = true;
+                    println!("Failed writing invalid RPU: Index {i}\n  {err:#}");
+                }
+
+                res.ok()
+            })
+            .collect();
 
         if let Some(to_duplicate) = config.duplicate.as_mut() {
             to_duplicate.sort_by_key(|meta| meta.offset);
@@ -176,6 +190,13 @@ impl EditConfig {
         let config: EditConfig = serde_json::from_reader(&json_file)?;
 
         Ok(config)
+    }
+
+    pub fn from_active_area(active_area: ActiveArea) -> Self {
+        Self {
+            active_area: Some(active_area),
+            ..Default::default()
+        }
     }
 
     fn execute(&self, rpus: &mut [Option<DoviRpu>]) -> Result<()> {
@@ -251,6 +272,10 @@ impl EditConfig {
             rpu.remove_mapping();
         }
 
+        if self.add_cmv4_default_metadata.is_some_and(|v| v) {
+            self.add_cmv4_safe_default_metadata(rpu)?;
+        }
+
         if let Some(l6) = &self.level6 {
             self.set_level6_metadata(rpu, l6)?;
         }
@@ -284,16 +309,16 @@ impl EditConfig {
         if range.contains('-') {
             let mut split = range.split('-');
 
-            if let Some(first) = split.next() {
-                if let Ok(first_num) = first.parse() {
-                    result.0 = first_num;
-                }
+            if let Some(first) = split.next()
+                && let Ok(first_num) = first.parse()
+            {
+                result.0 = first_num;
             }
 
-            if let Some(second) = split.next() {
-                if let Ok(second_num) = second.parse() {
-                    result.1 = second_num;
-                }
+            if let Some(second) = split.next()
+                && let Ok(second_num) = second.parse()
+            {
+                result.1 = second_num;
             }
 
             Ok(result)
@@ -419,11 +444,11 @@ impl EditConfig {
         // Allow passing "all" instead of a range
         // Do "all" presets before specific ranges
         for edit in edits {
-            if edit.0.to_lowercase() == "all" {
-                if let Some(vdr_dm_data) = rpu.vdr_dm_data.as_mut() {
-                    rpu.modified = true;
-                    vdr_dm_data.set_scene_cut(*edit.1);
-                }
+            if edit.0.to_lowercase() == "all"
+                && let Some(vdr_dm_data) = rpu.vdr_dm_data.as_mut()
+            {
+                rpu.modified = true;
+                vdr_dm_data.set_scene_cut(*edit.1);
             }
         }
 
@@ -495,14 +520,32 @@ impl EditConfig {
 
         Ok(())
     }
+
+    fn add_cmv4_safe_default_metadata(&self, rpu: &mut DoviRpu) -> Result<()> {
+        rpu.add_cmv40_safe_default_metadata()?;
+
+        Ok(())
+    }
+}
+
+impl ActiveAreaOffsets {
+    pub fn new(id: u16, meta: &ExtMetadataBlockLevel5) -> Self {
+        Self {
+            id,
+            left: meta.active_area_left_offset,
+            right: meta.active_area_right_offset,
+            top: meta.active_area_top_offset,
+            bottom: meta.active_area_bottom_offset,
+        }
+    }
 }
 
 impl ActiveArea {
     fn execute(&self, rpus: &mut [Option<DoviRpu>]) -> Result<()> {
-        if let Some(edits) = &self.edits {
-            if !edits.is_empty() {
-                self.do_edits(edits, rpus)?;
-            }
+        if let Some(edits) = &self.edits
+            && !edits.is_empty()
+        {
+            self.do_edits(edits, rpus)?;
         }
 
         Ok(())

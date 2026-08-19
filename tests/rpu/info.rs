@@ -1,14 +1,14 @@
 use std::path::Path;
 
 use anyhow::Result;
-use assert_cmd::Command;
+use assert_cmd::cargo;
 use predicates::prelude::*;
 
 const SUBCOMMAND: &str = "info";
 
 #[test]
 fn help() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let assert = cmd.arg(SUBCOMMAND).arg("--help").assert();
 
     assert
@@ -22,7 +22,7 @@ fn help() -> Result<()> {
 
 #[test]
 fn summary_p7_mel() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
 
     let input_rpu = Path::new("assets/hevc_tests/regular_rpu_mel.bin");
 
@@ -41,7 +41,7 @@ fn summary_p7_mel() -> Result<()> {
 
 #[test]
 fn summary_p7_fel() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
 
     let input_rpu = Path::new("assets/tests/fel_orig.bin");
 
@@ -64,7 +64,7 @@ fn summary_p7_fel() -> Result<()> {
 
 #[test]
 fn summary_p8() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
 
     let input_rpu = Path::new("assets/hevc_tests/regular_rpu.bin");
 
@@ -87,15 +87,17 @@ fn summary_p8() -> Result<()> {
 
 #[test]
 fn invalid_l3_error() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
 
     let input_rpu = Path::new("assets/tests/st2094_10_level3.bin");
 
     let assert = cmd.arg(SUBCOMMAND).arg(input_rpu).arg("-s").assert();
 
-    assert.failure().stderr(predicate::str::contains(
-        "Error: Found invalid RPU: Index 0, error: Invalid block level 3 for CM v2.9 RPU",
-    ));
+    assert.failure().stderr(
+        predicate::str::contains("Error: Found invalid RPU: Index 0").and(
+            predicate::str::contains("CM v2.9: Disallowed block level 3"),
+        ),
+    );
 
     Ok(())
 }

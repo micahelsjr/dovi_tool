@@ -185,19 +185,21 @@ impl GenerateConfig {
         Ok(list)
     }
 
-    pub fn encode_option_rpus(rpus: &mut [Option<DoviRpu>]) -> Vec<Vec<u8>> {
-        rpus.iter_mut()
-            .filter_map(|e| e.as_mut())
-            .map(|e| e.write_hevc_unspec62_nalu())
-            .filter_map(Result::ok)
-            .collect()
+    /// Encodes the RPUs for binary file format (HEVC UNSPEC62)
+    pub fn encode_option_rpus(rpus: &[Option<DoviRpu>]) -> impl Iterator<Item = Result<Vec<u8>>> {
+        rpus.iter()
+            .filter_map(|rpu| rpu.as_ref().map(|e| e.write_hevc_unspec62_nalu()))
     }
 
-    pub fn encode_rpus(rpus: &mut [DoviRpu]) -> Vec<Vec<u8>> {
-        rpus.iter_mut()
-            .map(|e| e.write_hevc_unspec62_nalu())
-            .filter_map(Result::ok)
-            .collect()
+    /// Encodes the RPUs for binary file format (HEVC UNSPEC62)
+    pub fn encode_rpus(rpus: &[DoviRpu]) -> impl Iterator<Item = Result<Vec<u8>>> {
+        rpus.iter().map(|e| e.write_hevc_unspec62_nalu())
+    }
+
+    /// Collects all valid results into a single list
+    /// Helper for use with list encoding functions
+    pub fn collect_encoded_rpus(rpus: impl Iterator<Item = Result<Vec<u8>>>) -> Vec<Vec<u8>> {
+        rpus.filter_map(Result::ok).collect()
     }
 
     pub fn write_rpus<P: AsRef<Path>>(&self, path: P) -> Result<()> {
@@ -399,7 +401,7 @@ mod tests {
         if let ExtMetadataBlock::Level11(level11) = shot1_vdr_dm_data.get_block(11).unwrap() {
             assert_eq!(level11.content_type, 1);
             assert_eq!(level11.whitepoint, 0);
-            assert!(level11.reference_mode_flag);
+            assert!(!level11.reference_mode_flag);
         }
 
         // SHOT 2
@@ -495,7 +497,7 @@ mod tests {
         if let ExtMetadataBlock::Level11(level11) = shot2_vdr_dm_data.get_block(11).unwrap() {
             assert_eq!(level11.content_type, 1);
             assert_eq!(level11.whitepoint, 0);
-            assert!(level11.reference_mode_flag);
+            assert!(!level11.reference_mode_flag);
         }
 
         // SHOT 3
@@ -539,7 +541,7 @@ mod tests {
         if let ExtMetadataBlock::Level11(level11) = shot3_vdr_dm_data.get_block(11).unwrap() {
             assert_eq!(level11.content_type, 1);
             assert_eq!(level11.whitepoint, 0);
-            assert!(level11.reference_mode_flag);
+            assert!(!level11.reference_mode_flag);
         }
 
         // Frame edit in shot 3, offset 10 = 229
@@ -609,7 +611,7 @@ mod tests {
         if let ExtMetadataBlock::Level11(level11) = shot3_edit_vdr_dm_data.get_block(11).unwrap() {
             assert_eq!(level11.content_type, 1);
             assert_eq!(level11.whitepoint, 0);
-            assert!(level11.reference_mode_flag);
+            assert!(!level11.reference_mode_flag);
         }
 
         Ok(())

@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use super::{ExtMetadataBlock, ExtMetadataBlockInfo};
 
-const MAX_WHITEPOINT_VALUE: u8 = 15;
-
 /// Content type metadata level
 #[repr(C)]
 #[derive(Debug, Default, Clone)]
@@ -29,16 +27,12 @@ impl ExtMetadataBlockLevel11 {
     pub(crate) fn parse(reader: &mut BsIoSliceReader) -> Result<ExtMetadataBlock> {
         let mut l11 = Self {
             content_type: reader.read::<8, u8>()?,
-            whitepoint: reader.read::<8, u8>()?,
-            reserved_byte2: reader.read::<8, u8>()?,
-            reserved_byte3: reader.read::<8, u8>()?,
             ..Default::default()
         };
 
-        if l11.whitepoint > MAX_WHITEPOINT_VALUE {
-            l11.reference_mode_flag = true;
-            l11.whitepoint -= MAX_WHITEPOINT_VALUE + 1;
-        }
+        l11.decode_byte1(reader.read::<8, u8>()?);
+        l11.reserved_byte2 = reader.read::<8, u8>()?;
+        l11.reserved_byte3 = reader.read::<8, u8>()?;
 
         Ok(ExtMetadataBlock::Level11(l11))
     }
@@ -46,14 +40,8 @@ impl ExtMetadataBlockLevel11 {
     pub fn write(&self, writer: &mut BitstreamIoWriter) -> Result<()> {
         self.validate()?;
 
-        let mut wp = self.whitepoint;
-
-        if self.reference_mode_flag {
-            wp += MAX_WHITEPOINT_VALUE + 1
-        }
-
         writer.write::<8, u8>(self.content_type)?;
-        writer.write::<8, u8>(wp)?;
+        writer.write::<8, u8>(self.encode_byte1())?;
         writer.write::<8, u8>(self.reserved_byte2)?;
         writer.write::<8, u8>(self.reserved_byte3)?;
 
@@ -63,21 +51,41 @@ impl ExtMetadataBlockLevel11 {
     pub fn validate(&self) -> Result<()> {
         ensure!(self.content_type <= 15);
         ensure!(self.whitepoint <= 15);
-        ensure!(self.reserved_byte2 == 0);
         ensure!(self.reserved_byte3 == 0);
 
         Ok(())
     }
 
-    /// Cinema, reference mode, D65 whitepoint
-    pub fn default_reference_cinema() -> Self {
+    /// Cinema, D65 whitepoint
+    pub const fn default_cinema() -> Self {
         Self {
             content_type: 1,
             whitepoint: 0,
-            reference_mode_flag: true,
+            reference_mode_flag: false,
             reserved_byte2: 0,
             reserved_byte3: 0,
         }
+    }
+
+    /// Cinema, reference mode, D65 whitepoint
+    pub const fn default_reference_cinema() -> Self {
+        let mut meta = Self::default_cinema();
+        meta.reference_mode_flag = true;
+
+        meta
+    }
+
+    const fn decode_byte1(&mut self, v: u8) {
+        // lowest 4 bits
+        self.whitepoint = v & 0x0F;
+
+        let remaining = v >> 4;
+        self.reference_mode_flag = remaining & 0x01 == 1;
+    }
+
+    const fn encode_byte1(&self) -> u8 {
+        let reference_mode_flag = self.reference_mode_flag as u8;
+        reference_mode_flag << 4 | self.whitepoint
     }
 }
 

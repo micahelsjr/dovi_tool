@@ -1,4 +1,4 @@
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use bitvec_helpers::{
     bitstream_io_reader::BsIoSliceReader, bitstream_io_writer::BitstreamIoWriter,
 };
@@ -6,9 +6,7 @@ use bitvec_helpers::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::extension_metadata::blocks::{
-    ExtMetadataBlock, ExtMetadataBlockLevel9, ExtMetadataBlockLevel11,
-};
+use super::extension_metadata::blocks::ExtMetadataBlock;
 use super::extension_metadata::*;
 use super::generate::{GenerateConfig, GenerateProfile};
 use super::profiles::DoviProfile;
@@ -96,14 +94,17 @@ pub(crate) fn vdr_dm_data_payload(
         VdrDmData::parse(reader)?
     };
 
-    if let Some(cmv29_dm_data) = DmData::parse::<CmV29DmData>(reader)? {
+    if let Some(cmv29_dm_data) =
+        DmData::parse::<CmV29DmData>(reader).with_context(|| CmV29DmData::VERSION)?
+    {
         vdr_dm_data.cmv29_metadata = Some(DmData::V29(cmv29_dm_data));
     }
 
-    if reader.available()? >= DM_DATA_PAYLOAD2_MIN_BITS {
-        if let Some(cmv40_dm_data) = DmData::parse::<CmV40DmData>(reader)? {
-            vdr_dm_data.cmv40_metadata = Some(DmData::V40(cmv40_dm_data));
-        }
+    if reader.available()? >= DM_DATA_PAYLOAD2_MIN_BITS
+        && let Some(cmv40_dm_data) =
+            DmData::parse::<CmV40DmData>(reader).with_context(|| CmV40DmData::VERSION)?
+    {
+        vdr_dm_data.cmv40_metadata = Some(DmData::V40(cmv40_dm_data));
     }
 
     Ok(vdr_dm_data)
@@ -178,11 +179,11 @@ impl VdrDmData {
         }
 
         if let Some(cmv29) = &self.cmv29_metadata {
-            cmv29.validate()?;
+            cmv29.validate().with_context(|| CmV29DmData::VERSION)?;
         }
 
         if let Some(cmv40) = &self.cmv40_metadata {
-            cmv40.validate()?;
+            cmv40.validate().with_context(|| CmV40DmData::VERSION)?;
         }
 
         Ok(())
@@ -234,11 +235,11 @@ impl VdrDmData {
         }
 
         if let Some(cmv29) = &self.cmv29_metadata {
-            cmv29.write(writer)?;
+            cmv29.write(writer).with_context(|| CmV29DmData::VERSION)?;
         }
 
         if let Some(cmv40) = &self.cmv40_metadata {
-            cmv40.write(writer)?;
+            cmv40.write(writer).with_context(|| CmV40DmData::VERSION)?;
         }
 
         Ok(())
@@ -315,9 +316,9 @@ impl VdrDmData {
 
         if let Some(dm_data) = self.extension_metadata_for_level_mut(level) {
             match dm_data {
-                DmData::V29(meta) => meta.add_block(block)?,
-                DmData::V40(meta) => meta.add_block(block)?,
-            }
+                DmData::V29(meta) => meta.add_block(block).with_context(|| CmV29DmData::VERSION),
+                DmData::V40(meta) => meta.add_block(block).with_context(|| CmV40DmData::VERSION),
+            }?
         }
 
         Ok(())
@@ -486,33 +487,24 @@ impl VdrDmData {
         .with_cmv29_dm_data();
 
         if config.cm_version == CmVersion::V40 {
-            vdr_dm_data.cmv40_metadata = if let Some(level254) = &config.level254 {
-                Some(DmData::V40(CmV40DmData::new_with_custom_l254(level254)))
-            } else {
-                Some(DmData::V40(CmV40DmData::new_with_l254_402()))
+            vdr_dm_data.cmv40_metadata = Some(DmData::V40(CmV40DmData::default_safe()));
+            if let Some(level254) = &config.level254 {
+                vdr_dm_data.replace_metadata_block(ExtMetadataBlock::Level254(level254.clone()))?;
             }
         }
 
-        vdr_dm_data.set_static_metadata(config)?;
+        vdr_dm_data.set_generate_default_metadata(config)?;
         vdr_dm_data.change_source_levels(config.source_min_pq, config.source_max_pq);
 
         Ok(vdr_dm_data)
     }
 
-    pub fn set_static_metadata(&mut self, config: &GenerateConfig) -> Result<()> {
+    pub(crate) fn set_generate_default_metadata(&mut self, config: &GenerateConfig) -> Result<()> {
         self.replace_metadata_block(ExtMetadataBlock::Level5(config.level5.clone()))?;
 
         if let Some(level6) = &config.level6 {
             self.replace_metadata_block(ExtMetadataBlock::Level6(level6.clone()))?;
         }
-
-        // Default to inserting both L9 (required) and L11 metadata
-        self.replace_metadata_block(ExtMetadataBlock::Level9(
-            ExtMetadataBlockLevel9::default_dci_p3(),
-        ))?;
-        self.replace_metadata_block(ExtMetadataBlock::Level11(
-            ExtMetadataBlockLevel11::default_reference_cinema(),
-        ))?;
 
         if !config.default_metadata_blocks.is_empty() {
             const LEVEL_BLOCK_LIST: &[u8] = &[5, 6];

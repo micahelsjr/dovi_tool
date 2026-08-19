@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::Result;
-use assert_cmd::Command;
+use assert_cmd::cargo;
 use assert_fs::prelude::*;
 use predicates::prelude::*;
 
@@ -11,7 +11,7 @@ const SUBCOMMAND: &str = "generate";
 
 #[test]
 fn help() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let assert = cmd.arg(SUBCOMMAND).arg("--help").assert();
 
     assert
@@ -23,7 +23,7 @@ fn help() -> Result<()> {
 
 #[test]
 fn generate_default_cmv29() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let generate_config = Path::new("assets/generator_examples/default_cmv29.json");
@@ -70,7 +70,7 @@ fn generate_default_cmv29() -> Result<()> {
 
 #[test]
 fn generate_default_cmv40() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let generate_config = Path::new("assets/generator_examples/default_cmv40.json");
@@ -98,9 +98,8 @@ fn generate_default_cmv40() -> Result<()> {
 
     // Only L5 and L6
     assert_eq!(vdr_dm_data.metadata_blocks(1).unwrap().len(), 2);
-    // Only L9, L11 and L254
-
-    assert_eq!(vdr_dm_data.metadata_blocks(3).unwrap().len(), 3);
+    // Only default L3, L9, L11 and L254
+    assert_eq!(vdr_dm_data.metadata_blocks(3).unwrap().len(), 4);
 
     if let ExtMetadataBlock::Level5(level5) = vdr_dm_data.get_block(5).unwrap() {
         assert_eq!(level5.get_offsets(), (0, 0, 0, 0));
@@ -121,7 +120,7 @@ fn generate_default_cmv40() -> Result<()> {
     if let ExtMetadataBlock::Level11(level11) = vdr_dm_data.get_block(11).unwrap() {
         assert_eq!(level11.content_type, 1);
         assert_eq!(level11.whitepoint, 0);
-        assert!(level11.reference_mode_flag);
+        assert!(!level11.reference_mode_flag);
     }
 
     Ok(())
@@ -129,7 +128,7 @@ fn generate_default_cmv40() -> Result<()> {
 
 #[test]
 fn generate_full() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let generate_config = Path::new("assets/generator_examples/full_example.json");
@@ -157,8 +156,8 @@ fn generate_full() -> Result<()> {
 
     // L1, L2 * 2, L5, L6
     assert_eq!(vdr_dm_data.metadata_blocks(1).unwrap().len(), 5);
-    // Only L9, L11 and L254
-    assert_eq!(vdr_dm_data.metadata_blocks(3).unwrap().len(), 3);
+    // Only default L3, L9, L11 and L254
+    assert_eq!(vdr_dm_data.metadata_blocks(3).unwrap().len(), 4);
 
     if let ExtMetadataBlock::Level5(level5) = vdr_dm_data.get_block(5).unwrap() {
         assert_eq!(level5.get_offsets(), (0, 0, 40, 40));
@@ -212,7 +211,7 @@ fn generate_full() -> Result<()> {
 
 #[test]
 fn generate_full_hdr10plus() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let generate_config = Path::new("assets/generator_examples/no_duration.json");
@@ -244,8 +243,8 @@ fn generate_full_hdr10plus() -> Result<()> {
 
     // Only L1, L2 and L5 and L6
     assert_eq!(shot1_vdr_dm_data.metadata_blocks(1).unwrap().len(), 4);
-    // Only L9, L11 and L254
-    assert_eq!(shot1_vdr_dm_data.metadata_blocks(3).unwrap().len(), 3);
+    // Only default L3, L9, L11 and L254
+    assert_eq!(shot1_vdr_dm_data.metadata_blocks(3).unwrap().len(), 4);
 
     // Shot L1 is ignored, HDR10+ is used
     if let ExtMetadataBlock::Level1(level1) = shot1_vdr_dm_data.get_block(1).unwrap() {
@@ -279,8 +278,8 @@ fn generate_full_hdr10plus() -> Result<()> {
 
     // Only L1, L5 and L6
     assert_eq!(shot2_vdr_dm_data.metadata_blocks(1).unwrap().len(), 4);
-    // Only L9, L11 and L254
-    assert_eq!(shot2_vdr_dm_data.metadata_blocks(3).unwrap().len(), 3);
+    // Only default L3, L9, L11 and L254
+    assert_eq!(shot2_vdr_dm_data.metadata_blocks(3).unwrap().len(), 4);
 
     if let ExtMetadataBlock::Level1(level1) = shot2_vdr_dm_data.get_block(1).unwrap() {
         assert_eq!(level1.min_pq, 0);
@@ -320,8 +319,8 @@ fn generate_full_hdr10plus() -> Result<()> {
 
     // Only L1, L2 * 2, L5 and L6
     assert_eq!(edit_vdr_dm_data.metadata_blocks(1).unwrap().len(), 5);
-    // Only L9, L11 and L254
-    assert_eq!(edit_vdr_dm_data.metadata_blocks(3).unwrap().len(), 3);
+    // Only default L3, L9, L11 and L254
+    assert_eq!(edit_vdr_dm_data.metadata_blocks(3).unwrap().len(), 4);
 
     // Also ignored L1 from edit
     if let ExtMetadataBlock::Level1(level1) = edit_vdr_dm_data.get_block(1).unwrap() {
@@ -360,7 +359,7 @@ fn generate_full_hdr10plus() -> Result<()> {
 
 #[test]
 fn xml_cmv2_9_with_l5() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let xml = Path::new("assets/tests/cmv2_9.xml");
@@ -391,7 +390,7 @@ fn xml_cmv2_9_with_l5() -> Result<()> {
 
 #[test]
 fn xml_cmv4_0_2() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let xml = Path::new("assets/tests/cmv4_0_2.xml");
@@ -418,7 +417,7 @@ fn xml_cmv4_0_2() -> Result<()> {
 
 #[test]
 fn xml_cmv4_0_2_with_l5() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let xml = Path::new("assets/tests/cmv4_0_2.xml");
@@ -449,7 +448,7 @@ fn xml_cmv4_0_2_with_l5() -> Result<()> {
 
 #[test]
 fn xml_cmv4_0_2_custom_displays() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let xml = Path::new("assets/tests/cmv4_0_2_custom_displays.xml");
@@ -480,7 +479,7 @@ fn xml_cmv4_0_2_custom_displays() -> Result<()> {
 
 #[test]
 fn xml_cmv4_2_510() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let xml = Path::new("assets/tests/cmv4_2_xml_510.xml");
@@ -507,7 +506,7 @@ fn xml_cmv4_2_510() -> Result<()> {
 
 #[test]
 fn generate_l1_cmv29() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let generate_config = Path::new("assets/generator_examples/l1_cmv29.json");
@@ -567,7 +566,7 @@ fn generate_l1_cmv29() -> Result<()> {
 
 #[test]
 fn generate_l1_cmv40() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let generate_config = Path::new("assets/generator_examples/l1_cmv40.json");
@@ -623,7 +622,7 @@ fn generate_l1_cmv40() -> Result<()> {
 
 #[test]
 fn l1_cmv29_override_avg_cmv40() -> Result<()> {
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+    let mut cmd = cargo::cargo_bin_cmd!();
     let temp = assert_fs::TempDir::new().unwrap();
 
     let generate_config = Path::new("assets/generator_examples/l1_cmv29_override_avg_cmv40.json");
